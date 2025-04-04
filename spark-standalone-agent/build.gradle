@@ -27,7 +27,7 @@ dependencies {
 
 tasks.withType(JavaCompile).configureEach {
     options.compilerArgs += ['--add-modules', 'jdk.attach']
-    options.release = 11
+    options.release = 17
 }
 
 blossom {
@@ -74,4 +74,9 @@ shadowJar {
 artifacts {
     archives shadowJar
     shadow shadowJar
+}
+
+compileJava {
+    options.encoding = 'UTF-8'
+    options.release = 17
 }

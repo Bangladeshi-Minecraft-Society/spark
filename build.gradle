@@ -40,7 +40,7 @@ subprojects {
 
     tasks.withType(JavaCompile).configureEach {
         options.encoding = 'UTF-8'
-        options.release = 8
+        options.release = 17
     }
 
     tasks.withType(Test).configureEach {
@@ -82,12 +82,23 @@ subprojects {
 }
 
 def determinePatchVersion() {
-    def tagInfo = new ByteArrayOutputStream()
-    exec {
-        commandLine 'git', 'describe', '--tags'
-        standardOutput = tagInfo
+    def tagInfo = null
+    try {
+        def stdout = new ByteArrayOutputStream()
+        exec {
+            commandLine 'git', 'describe', '--tags'
+            standardOutput = stdout
+            ignoreExitValue = true
+        }
+        tagInfo = stdout.toString().trim()
+    } catch (Exception e) {
+        logger.warn("Failed to determine Git version: " + e.getMessage())
+        return 0
     }
-    tagInfo = tagInfo.toString()
+
+    if (tagInfo == null || tagInfo.isEmpty()) {
+        return 0
+    }
 
     return tagInfo.contains('-') ? tagInfo.split("-")[1] : 0
 }

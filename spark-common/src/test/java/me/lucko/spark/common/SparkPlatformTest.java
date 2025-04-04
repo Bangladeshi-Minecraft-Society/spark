@@ -63,7 +63,8 @@ public class SparkPlatformTest {
                             "spark.gcmonitor",
                             "spark.heapsummary",
                             "spark.heapdump",
-                            "spark.activity"
+                            "spark.activity",
+                            "spark.jfrmethods"
                     ),
                     permissions
             );

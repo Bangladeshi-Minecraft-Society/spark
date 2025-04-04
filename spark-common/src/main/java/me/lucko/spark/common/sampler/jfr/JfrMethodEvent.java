@@ -163,11 +163,14 @@ public class JfrMethodEvent {
      * @return string describing the trend
      */
     public String getTrendDescription() {
-        return switch (trend) {
-            case 1 -> "increasing";
-            case -1 -> "decreasing";
-            default -> "stable";
-        };
+        switch (trend) {
+            case 1:
+                return "increasing";
+            case -1:
+                return "decreasing";
+            default:
+                return "stable";
+        }
     }
     
     @Override
