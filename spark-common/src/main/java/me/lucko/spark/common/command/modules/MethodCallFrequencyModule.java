@@ -39,6 +39,7 @@ import java.util.Map;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
+import java.util.Set;
 
 import static net.kyori.adventure.text.Component.text;
 import static net.kyori.adventure.text.format.NamedTextColor.*;
@@ -58,40 +59,84 @@ public class MethodCallFrequencyModule implements CommandModule {
     
     @Override
     public void registerCommands(Consumer<Command> consumer) {
+        // Main command - just shows usage
         consumer.accept(Command.builder()
                 .aliases("jfrmethods", "methodcalls", "methodfreq")
-                .argumentUsage("start", "", null)
-                .argumentUsage("stop", "", null)
-                .argumentUsage("filter", "add|remove|clear|list", null)
-                .argumentUsage("threshold", "value", null)
-                .argumentUsage("status", "", null)
-                .executor(this::handleMethodCallFrequency)
+                .executor((platform, sender, resp, args) -> {
+                    resp.replyPrefixed(text("Usage:", YELLOW));
+                    resp.reply(text("/spark jfrmethods start - Start method call frequency profiling", GRAY));
+                    resp.reply(text("/spark jfrmethods stop - Stop method call frequency profiling", GRAY));
+                    resp.reply(text("/spark jfrmethods status - Show profiler status", GRAY));
+                    resp.reply(text("/spark jfrmethods filter <add|remove|clear> - Manage method filters", GRAY));
+                    resp.reply(text("/spark jfrmethods threshold <value> - Set call threshold", GRAY));
+                })
+                .build()
+        );
+        
+        // Start command
+        consumer.accept(Command.builder()
+                .aliases("jfrmethods start")
+                .argumentUsage("samplingrate", "rate in ms", null)
+                .argumentUsage("filter", "regex pattern", null)
+                .argumentUsage("threshold", "call count", null)
+                .executor((platform, sender, resp, args) -> {
+                    startProfiler(platform, sender, resp, args);
+                })
+                .tabCompleter((platform, sender, arguments) -> {
+                    return TabCompleter.completeForOpts(arguments, 
+                        "--samplingrate", "--filter", "--threshold");
+                })
+                .build()
+        );
+        
+        // Stop command
+        consumer.accept(Command.builder()
+                .aliases("jfrmethods stop")
+                .executor((platform, sender, resp, args) -> {
+                    stopProfiler(resp);
+                })
+                .build()
+        );
+        
+        // Status command
+        consumer.accept(Command.builder()
+                .aliases("jfrmethods status")
+                .executor((platform, sender, resp, args) -> {
+                    showStatus(resp);
+                })
+                .build()
+        );
+        
+        // Filter command
+        consumer.accept(Command.builder()
+                .aliases("jfrmethods filter")
+                .executor((platform, sender, resp, args) -> {
+                    List<String> rawArgs = args.raw();
+                    if (rawArgs.isEmpty()) {
+                        resp.replyPrefixed(text("Usage: /spark jfrmethods filter <add|remove|clear|list>", YELLOW));
+                        return;
+                    }
+                    manageFilters(rawArgs, resp);
+                })
                 .tabCompleter((platform, sender, arguments) -> {
                     if (arguments.isEmpty()) {
-                        return Arrays.asList("start", "stop", "filter", "threshold", "status");
+                        return Arrays.asList("add", "remove", "clear", "list");
                     }
-                    
-                    String subCommand = arguments.get(0).toLowerCase();
-                    if (arguments.size() == 1) {
-                        List<String> options = Arrays.asList("start", "stop", "filter", "threshold", "status");
-                        return filterStartingWith(subCommand, options);
-                    }
-                    
-                    if (subCommand.equals("start") && arguments.size() == 2) {
-                        List<String> options = Arrays.asList("--rate=20", "--filter=", "--threshold=1000");
-                        return filterStartingWith(arguments.get(1), options);
-                    }
-                    
-                    if (subCommand.equals("filter") && arguments.size() == 2) {
-                        List<String> options = Arrays.asList("add", "remove", "clear", "list");
-                        return filterStartingWith(arguments.get(1), options);
-                    }
-                    
-                    if (subCommand.equals("threshold") && arguments.size() == 2) {
-                        return Collections.singletonList("1000");
-                    }
-                    
                     return Collections.emptyList();
+                })
+                .build()
+        );
+        
+        // Threshold command
+        consumer.accept(Command.builder()
+                .aliases("jfrmethods threshold")
+                .executor((platform, sender, resp, args) -> {
+                    List<String> rawArgs = args.raw();
+                    if (rawArgs.isEmpty()) {
+                        resp.replyPrefixed(text("Usage: /spark jfrmethods threshold <value>", YELLOW));
+                        return;
+                    }
+                    setThreshold(rawArgs, resp);
                 })
                 .build()
         );
@@ -114,81 +159,39 @@ public class MethodCallFrequencyModule implements CommandModule {
         return result;
     }
     
-    private void handleMethodCallFrequency(SparkPlatform platform, CommandSender sender, CommandResponseHandler resp, Arguments arguments) {
-        List<String> args = arguments.raw();
-        if (args.isEmpty()) {
-            resp.replyPrefixed(text("Usage: /spark jfrmethods <start|stop|filter|threshold|status>", YELLOW));
-            return;
-        }
-        
-        String subCommand = args.get(0).toLowerCase();
-        if (subCommand.startsWith("--")) {
-            resp.replyPrefixed(text("Usage: /spark jfrmethods <start|stop|filter|threshold|status>", YELLOW));
-            return;
-        }
-        
-        switch (subCommand) {
-            case "start":
-                startProfiler(args.size() > 1 ? args.subList(1, args.size()) : Collections.emptyList(), resp);
-                break;
-            case "stop":
-                stopProfiler(resp);
-                break;
-            case "filter":
-                manageFilters(args.size() > 1 ? args.subList(1, args.size()) : Collections.emptyList(), resp);
-                break;
-            case "threshold":
-                setThreshold(args.size() > 1 ? args.subList(1, args.size()) : Collections.emptyList(), resp);
-                break;
-            case "status":
-                showStatus(resp);
-                break;
-            default:
-                resp.replyPrefixed(text("Unknown sub-command: " + args.get(0), RED));
-                break;
-        }
-    }
-    
-    private void startProfiler(List<String> args, CommandResponseHandler resp) {
+    private void startProfiler(SparkPlatform platform, CommandSender sender, CommandResponseHandler resp, Arguments arguments) {
         if (profiler != null && profiler.isActive()) {
             resp.replyPrefixed(text("Method call frequency profiler is already running. Stop it first with /spark jfrmethods stop", YELLOW));
             return;
         }
         
-        // Parse arguments
-        int samplingRate = 20; // Default to 20ms
-        List<Pattern> filters = new ArrayList<>();
-        long threshold = 1000; // Default threshold
+        // Get sampling rate from flag
+        int samplingRate = arguments.intFlag("samplingrate");
+        if (samplingRate == -1) { // Not specified
+            samplingRate = 20; // Default to 20ms
+        } else if (samplingRate < 1) {
+            resp.replyPrefixed(text("Sampling rate must be at least 1ms", RED));
+            return;
+        }
         
-        for (String arg : args) {
-            if (arg.startsWith("--rate=")) {
-                try {
-                    samplingRate = Integer.parseInt(arg.substring(7));
-                    if (samplingRate < 1) {
-                        resp.replyPrefixed(text("Sampling rate must be at least 1ms", RED));
-                        return;
-                    }
-                } catch (NumberFormatException e) {
-                    resp.replyPrefixed(text("Invalid sampling rate: " + arg.substring(7), RED));
-                    return;
-                }
-            } else if (arg.startsWith("--filter=")) {
-                String filterPattern = arg.substring(9);
+        // Get threshold from flag
+        long threshold = arguments.intFlag("threshold");
+        if (threshold == -1) { // Not specified
+            threshold = 1000; // Default threshold
+        } else if (threshold < 0) {
+            resp.replyPrefixed(text("Threshold cannot be negative", RED));
+            return;
+        }
+        
+        // Get filters from flag
+        List<Pattern> filters = new ArrayList<>();
+        Set<String> filterPatterns = arguments.stringFlag("filter");
+        if (filterPatterns != null && !filterPatterns.isEmpty()) {
+            for (String filterPattern : filterPatterns) {
                 try {
                     filters.add(Pattern.compile(filterPattern));
                 } catch (PatternSyntaxException e) {
                     resp.replyPrefixed(text("Invalid filter pattern: " + filterPattern, RED));
-                    return;
-                }
-            } else if (arg.startsWith("--threshold=")) {
-                try {
-                    threshold = Long.parseLong(arg.substring(12));
-                    if (threshold < 0) {
-                        resp.replyPrefixed(text("Threshold cannot be negative", RED));
-                        return;
-                    }
-                } catch (NumberFormatException e) {
-                    resp.replyPrefixed(text("Invalid threshold: " + arg.substring(12), RED));
                     return;
                 }
             }

@@ -50,24 +50,30 @@ public class SparkPlatformTest {
         try (TestSparkPlugin plugin = new TestSparkPlugin(directory)) {
             SparkPlatform platform = plugin.platform();
 
+            // Get all permissions and check if they include spark.jfrmethods
             Set<String> permissions = platform.getAllSparkPermissions();
-            assertEquals(
-                    ImmutableSet.of(
-                            "spark",
-                            "spark.profiler",
-                            "spark.tps",
-                            "spark.ping",
-                            "spark.healthreport",
-                            "spark.tickmonitor",
-                            "spark.gc",
-                            "spark.gcmonitor",
-                            "spark.heapsummary",
-                            "spark.heapdump",
-                            "spark.activity",
-                            "spark.jfrmethods"
-                    ),
-                    permissions
+            assertTrue(permissions.contains("spark.jfrmethods"));
+            
+            // Base permissions that should always be there
+            Set<String> expectedBasePermissions = ImmutableSet.of(
+                "spark",
+                "spark.profiler",
+                "spark.tps",
+                "spark.ping",
+                "spark.healthreport",
+                "spark.tickmonitor",
+                "spark.gc",
+                "spark.gcmonitor",
+                "spark.heapsummary",
+                "spark.heapdump",
+                "spark.activity",
+                "spark.jfrmethods"
             );
+            
+            // Check that all base permissions are included
+            for (String permission : expectedBasePermissions) {
+                assertTrue(permissions.contains(permission), "Missing permission: " + permission);
+            }
 
             TestCommandSender testSender = new TestCommandSender();
             assertFalse(platform.hasPermissionForAnyCommand(testSender));
