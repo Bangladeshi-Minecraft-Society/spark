@@ -59,87 +59,90 @@ public class MethodCallFrequencyModule implements CommandModule {
     
     @Override
     public void registerCommands(Consumer<Command> consumer) {
-        // Main command - just shows usage
         consumer.accept(Command.builder()
                 .aliases("jfrmethods", "methodcalls", "methodfreq")
+                .allowSubCommand(true)
                 .executor((platform, sender, resp, args) -> {
-                    resp.replyPrefixed(text("Usage:", YELLOW));
-                    resp.reply(text("/spark jfrmethods start - Start method call frequency profiling", GRAY));
-                    resp.reply(text("/spark jfrmethods stop - Stop method call frequency profiling", GRAY));
-                    resp.reply(text("/spark jfrmethods status - Show profiler status", GRAY));
-                    resp.reply(text("/spark jfrmethods filter <add|remove|clear> - Manage method filters", GRAY));
-                    resp.reply(text("/spark jfrmethods threshold <value> - Set call threshold", GRAY));
-                })
-                .build()
-        );
-        
-        // Start command
-        consumer.accept(Command.builder()
-                .aliases("jfrmethods start")
-                .argumentUsage("samplingrate", "rate in ms", null)
-                .argumentUsage("filter", "regex pattern", null)
-                .argumentUsage("threshold", "call count", null)
-                .executor((platform, sender, resp, args) -> {
-                    startProfiler(platform, sender, resp, args);
-                })
-                .tabCompleter((platform, sender, arguments) -> {
-                    return TabCompleter.completeForOpts(arguments, 
-                        "--samplingrate", "--filter", "--threshold");
-                })
-                .build()
-        );
-        
-        // Stop command
-        consumer.accept(Command.builder()
-                .aliases("jfrmethods stop")
-                .executor((platform, sender, resp, args) -> {
-                    stopProfiler(resp);
-                })
-                .build()
-        );
-        
-        // Status command
-        consumer.accept(Command.builder()
-                .aliases("jfrmethods status")
-                .executor((platform, sender, resp, args) -> {
-                    showStatus(resp);
-                })
-                .build()
-        );
-        
-        // Filter command
-        consumer.accept(Command.builder()
-                .aliases("jfrmethods filter")
-                .executor((platform, sender, resp, args) -> {
-                    List<String> rawArgs = args.raw();
-                    if (rawArgs.isEmpty()) {
-                        resp.replyPrefixed(text("Usage: /spark jfrmethods filter <add|remove|clear|list>", YELLOW));
+                    String subCommand = args.subCommand();
+                    
+                    if (subCommand == null || subCommand.isEmpty()) {
+                        // Show usage if no subcommand specified
+                        showUsage(resp);
                         return;
                     }
-                    manageFilters(rawArgs, resp);
+                    
+                    switch (subCommand.toLowerCase()) {
+                        case "start":
+                            startProfiler(platform, sender, resp, args);
+                            break;
+                        case "stop":
+                            stopProfiler(resp);
+                            break;
+                        case "status":
+                            showStatus(resp);
+                            break;
+                        case "filter":
+                            List<String> rawArgs = args.raw();
+                            if (rawArgs.isEmpty()) {
+                                resp.replyPrefixed(text("Usage: /spark jfrmethods filter <add|remove|clear|list> [pattern]", YELLOW));
+                                return;
+                            }
+                            manageFilters(rawArgs, resp);
+                            break;
+                        case "threshold":
+                            List<String> thresholdArgs = args.raw();
+                            if (thresholdArgs.isEmpty()) {
+                                resp.replyPrefixed(text("Usage: /spark jfrmethods threshold <value>", YELLOW));
+                                return;
+                            }
+                            setThreshold(thresholdArgs, resp);
+                            break;
+                        default:
+                            resp.replyPrefixed(text("Unknown subcommand: " + subCommand, RED));
+                            resp.reply(text("Use /spark jfrmethods for usage information", GRAY));
+                            break;
+                    }
                 })
                 .tabCompleter((platform, sender, arguments) -> {
                     if (arguments.isEmpty()) {
-                        return Arrays.asList("add", "remove", "clear", "list");
+                        return Arrays.asList("start", "stop", "status", "filter", "threshold");
                     }
+                    
+                    if (arguments.size() == 1) {
+                        String arg = arguments.get(0).toLowerCase();
+                        List<String> completions = filterStartingWith(arg, 
+                                Arrays.asList("start", "stop", "status", "filter", "threshold"));
+                        if (!completions.isEmpty()) {
+                            return completions;
+                        }
+                    }
+                    
+                    if (arguments.size() >= 2) {
+                        String subCmd = arguments.get(0).toLowerCase();
+                        if (subCmd.equals("start")) {
+                            return TabCompleter.completeForOpts(
+                                arguments.subList(1, arguments.size()),
+                                "--samplingrate", "--filter", "--threshold"
+                            );
+                        } else if (subCmd.equals("filter") && arguments.size() == 2) {
+                            String arg = arguments.get(1).toLowerCase();
+                            return filterStartingWith(arg, Arrays.asList("add", "remove", "clear", "list"));
+                        }
+                    }
+                    
                     return Collections.emptyList();
                 })
                 .build()
         );
-        
-        // Threshold command
-        consumer.accept(Command.builder()
-                .aliases("jfrmethods threshold")
-                .executor((platform, sender, resp, args) -> {
-                    List<String> rawArgs = args.raw();
-                    if (rawArgs.isEmpty()) {
-                        resp.replyPrefixed(text("Usage: /spark jfrmethods threshold <value>", YELLOW));
-                        return;
-                    }
-                    setThreshold(rawArgs, resp);
-                })
-                .build()
-        );
+    }
+    
+    private void showUsage(CommandResponseHandler resp) {
+        resp.replyPrefixed(text("Usage:", YELLOW));
+        resp.reply(text("/spark jfrmethods start [--samplingrate <ms>] [--filter <regex>] [--threshold <count>]", GRAY));
+        resp.reply(text("/spark jfrmethods stop - Stop method call frequency profiling", GRAY));
+        resp.reply(text("/spark jfrmethods status - Show profiler status", GRAY));
+        resp.reply(text("/spark jfrmethods filter <add|remove|clear|list> [pattern] - Manage method filters", GRAY));
+        resp.reply(text("/spark jfrmethods threshold <value> - Set call threshold", GRAY));
     }
     
     /**
