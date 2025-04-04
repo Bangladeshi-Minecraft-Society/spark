@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package me.lucko.spark.proto;
+
+option java_package = "me.lucko.spark.proto";
+option java_outer_classname = "SparkJfrMethodProfilerProtos";
+
+// Represents method call frequency data for a specific server tick
+message MethodCallFrequencyData {
+  // The server tick number
+  int32 tick = 1;
+  
+  // Timestamp when the data was collected
+  int64 timestamp = 2;
+  
+  // Map of method names to call counts
+  map<string, int64> method_counts = 3;
+  
+  // Method trends (-1=decreasing, 0=stable, 1=increasing)
+  map<string, sint32> method_trends = 4;
+  
+  // The tick duration in milliseconds
+  double tick_duration_ms = 5;
+  
+  // If the server had performance issues during this tick
+  bool is_problem_tick = 6;
+}
+
+// Container for multiple ticks of method call frequency data
+message MethodCallFrequencyReport {
+  // Server information
+  string server_name = 1;
+  string server_version = 2;
+  
+  // Collection of data for each tick
+  repeated MethodCallFrequencyData ticks = 3;
+  
+  // Metadata about the sampling
+  message SamplingMetadata {
+    // The sampling rate used (ms)
+    int32 sampling_rate_ms = 1;
+    
+    // Threshold used for logging excessive calls
+    int64 excessive_call_threshold = 2;
+    
+    // Filters used during collection (regex patterns)
+    repeated string method_filters = 3;
+  }
+  
+  // Sampling metadata
+  SamplingMetadata metadata = 4;
+  
+  // Summary statistics
+  message SummaryStatistics {
+    // Total number of unique methods seen
+    int32 unique_method_count = 1;
+    
+    // Top methods by average calls per tick
+    message TopMethod {
+      string method_name = 1;
+      double avg_calls_per_tick = 2;
+      int64 max_calls = 3;
+      int64 total_calls = 4;
+    }
+    
+    // Top methods across all ticks
+    repeated TopMethod top_methods = 2;
+    
+    // Average calls per tick across all methods
+    double avg_calls_per_tick = 3;
+  }
+  
+  // Summary statistics
+  SummaryStatistics summary = 5;
+} 

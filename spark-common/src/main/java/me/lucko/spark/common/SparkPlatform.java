@@ -33,6 +33,7 @@ import me.lucko.spark.common.command.modules.ActivityLogModule;
 import me.lucko.spark.common.command.modules.GcMonitoringModule;
 import me.lucko.spark.common.command.modules.HealthModule;
 import me.lucko.spark.common.command.modules.HeapAnalysisModule;
+import me.lucko.spark.common.command.modules.MethodCallFrequencyModule;
 import me.lucko.spark.common.command.modules.SamplerModule;
 import me.lucko.spark.common.command.modules.TickMonitoringModule;
 import me.lucko.spark.common.command.sender.CommandSender;
@@ -152,7 +153,8 @@ public class SparkPlatform {
                 new TickMonitoringModule(),
                 new GcMonitoringModule(),
                 new HeapAnalysisModule(),
-                new ActivityLogModule()
+                new ActivityLogModule(),
+                new MethodCallFrequencyModule(this)
         );
 
         ImmutableList.Builder<Command> commandsBuilder = ImmutableList.builder();
