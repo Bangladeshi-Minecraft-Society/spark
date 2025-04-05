@@ -259,13 +259,21 @@ public class JfrReader implements Closeable {
     }
 
     private boolean readChunk(int pos) throws IOException {
-        if (pos + CHUNK_HEADER_SIZE > buf.limit() || buf.getInt(pos) != CHUNK_SIGNATURE) {
-            throw new IOException("Not a valid JFR file");
+        if (pos + CHUNK_HEADER_SIZE > buf.limit()) {
+            throw new IOException("Not a valid JFR file: buffer too small for chunk header");
+        }
+        
+        int signature = buf.getInt(pos);
+        if (signature != CHUNK_SIGNATURE) {
+            throw new IOException("Not a valid JFR file: invalid signature 0x" + 
+                                  Integer.toHexString(signature) + ", expected 0x" + 
+                                  Integer.toHexString(CHUNK_SIGNATURE));
         }
 
         int version = buf.getInt(pos + 4);
-        if (version < 0x20000 || version > 0x2ffff) {
-            throw new IOException("Unsupported JFR version: " + (version >>> 16) + "." + (version & 0xffff));
+        if (version < 0x20000 || version > 0x30000) {
+            throw new IOException("Unsupported JFR version: " + (version >>> 16) + "." + (version & 0xffff) + 
+                                  ". Supported versions are 2.0 through 3.0");
         }
 
         long chunkStart = filePosition + pos;
@@ -294,9 +302,13 @@ public class JfrReader implements Closeable {
         types.clear();
         typesByName.clear();
 
-        readMeta(chunkStart + metaOffset);
-        readConstantPool(chunkStart + cpOffset);
-        cacheEventTypes();
+        try {
+            readMeta(chunkStart + metaOffset);
+            readConstantPool(chunkStart + cpOffset);
+            cacheEventTypes();
+        } catch (Exception e) {
+            throw new IOException("Error processing JFR chunk data: " + e.getMessage(), e);
+        }
 
         seek(chunkStart + CHUNK_HEADER_SIZE);
         state = STATE_READING;

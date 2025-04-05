@@ -40,6 +40,9 @@ public class JfrMethodReader extends JfrReader {
 
     private static final String JDK_METHOD_ENTRY_EVENT = "jdk.ExecutionSample";
     private static final String JDK_METHOD_SAMPLE_EVENT = "jdk.MethodSample";
+    private static final String JDK_METHOD_PROFILE_EVENT = "jdk.MethodProfiler";
+    private static final String JDK_METHOD_TRACE_EVENT = "jdk.MethodTrace";
+    private static final String JDK_METHOD_TIMING_EVENT = "jdk.MethodTiming";
     
     /** Pattern to filter method names */
     private final List<Pattern> methodFilters;
@@ -68,9 +71,19 @@ public class JfrMethodReader extends JfrReader {
     public Map<String, Long> processMethodCalls() throws IOException {
         Map<String, Long> results = new HashMap<>();
         
-        // Process both execution samples and method samples
-        processEventType(JDK_METHOD_ENTRY_EVENT);
-        processEventType(JDK_METHOD_SAMPLE_EVENT);
+        try {
+            // Process both Java 8-17 style events
+            processEventType(JDK_METHOD_ENTRY_EVENT);
+            processEventType(JDK_METHOD_SAMPLE_EVENT);
+            
+            // Process Java 21 style events
+            processEventType(JDK_METHOD_PROFILE_EVENT);
+            processEventType(JDK_METHOD_TRACE_EVENT);
+            processEventType(JDK_METHOD_TIMING_EVENT);
+        } catch (Exception e) {
+            // Continue with whatever data we collected, but log the error
+            System.err.println("Warning: Error processing some JFR events: " + e.getMessage());
+        }
         
         // Convert to the result format
         for (JfrMethodEvent event : methodEvents.values()) {

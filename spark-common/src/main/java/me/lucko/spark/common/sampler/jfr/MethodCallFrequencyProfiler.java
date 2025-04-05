@@ -147,22 +147,63 @@ public class MethodCallFrequencyProfiler implements FlightRecorderListener, Auto
             // Create temporary file for JFR data
             this.recordingPath = platform.getTemporaryFiles().create("spark-", "-method-profile.jfr");
             
+            // First try to determine if we can use predefined configuration
+            Configuration config;
+            try {
+                // Try to use "profile" configuration first
+                config = Configuration.getConfiguration("profile");
+                platform.getPlugin().log(Level.INFO, "Using 'profile' JFR configuration for method profiling.");
+            } catch (Exception e1) {
+                try {
+                    // Fall back to "default" configuration
+                    config = Configuration.getConfiguration("default");
+                    platform.getPlugin().log(Level.INFO, "Using 'default' JFR configuration for method profiling.");
+                } catch (Exception e2) {
+                    // Create minimal custom configuration if neither is available
+                    platform.getPlugin().log(Level.INFO, "Using custom JFR configuration for method profiling.");
+                    config = this.configuration;
+                }
+            }
+            
             // Start the recording
-            this.recording = new Recording(this.configuration);
+            this.recording = new Recording(config);
             this.recording.setName("spark-method-profile");
             this.recording.setMaxAge(Duration.ofMinutes(10));
             this.recording.setDestination(this.recordingPath);
             
-            // Configure method profiling - we'll use a basic configuration
-            // that works across different JDK versions
+            // Configure method profiling for Java 11-21 compatibility
             try {
-                // Enable execution sampling with our specified interval
-                recording.enable("jdk.ExecutionSample");
+                // Enable events for different Java versions
                 
-                // Other settings would be configured here if needed
-                // This simplified approach works across JDK versions
+                // Java 11-17 style events
+                recording.enable("jdk.ExecutionSample").withPeriod(Duration.ofMillis(samplingInterval));
+                
+                // Try enabling Java 21 specific events if available
+                try {
+                    recording.enable("jdk.MethodSample").withPeriod(Duration.ofMillis(samplingInterval));
+                } catch (Exception e) {
+                    // Expected on older Java versions
+                }
+                
+                try {
+                    recording.enable("jdk.MethodProfiler");
+                } catch (Exception e) {
+                    // Expected on older Java versions
+                }
+                
+                try {
+                    recording.enable("jdk.MethodTrace");
+                } catch (Exception e) {
+                    // Expected on older Java versions
+                }
+                
+                try {
+                    recording.enable("jdk.MethodTiming");
+                } catch (Exception e) {
+                    // Expected on older Java versions
+                }
             } catch (Exception e) {
-                platform.getPlugin().log(Level.WARNING, "Unable to fully configure JFR settings", e);
+                platform.getPlugin().log(Level.WARNING, "Unable to fully configure JFR settings. Basic functionality will still be available.", e);
             }
             
             // Start recording
@@ -203,13 +244,14 @@ public class MethodCallFrequencyProfiler implements FlightRecorderListener, Auto
         }
         
         // Clean up temporary file
-        try {
-            if (recordingPath != null) {
-                Files.deleteIfExists(recordingPath);
-            }
-        } catch (IOException e) {
-            platform.getPlugin().log(Level.WARNING, "Failed to delete JFR recording file", e);
-        }
+        // We want to keep the JFR file for external analysis, so don't delete it.
+        // if (recordingPath != null) {
+        //     try {
+        //         Files.deleteIfExists(recordingPath);
+        //     } catch (IOException e) {
+        //         platform.getPlugin().log(Level.WARNING, "Failed to delete JFR recording file", e);
+        //     }
+        // }
         
         // Shutdown executor
         executor.shutdown();
@@ -234,6 +276,25 @@ public class MethodCallFrequencyProfiler implements FlightRecorderListener, Auto
         }
         
         try {
+            // Check if the recording file exists
+            if (recordingPath == null || !Files.exists(recordingPath)) {
+                platform.getPlugin().log(Level.WARNING, "JFR recording file not found or not yet created");
+                return;
+            }
+            
+            // Check if the file is accessible
+            if (!Files.isReadable(recordingPath)) {
+                platform.getPlugin().log(Level.WARNING, "JFR recording file is not readable: " + recordingPath);
+                return;
+            }
+            
+            // Get file size
+            long fileSize = Files.size(recordingPath);
+            if (fileSize == 0) {
+                platform.getPlugin().log(Level.FINE, "JFR recording file is empty, waiting for data...");
+                return;
+            }
+            
             // Read JFR data since last check
             Map<String, Long> methodCounts = new HashMap<>();
             
@@ -241,32 +302,39 @@ public class MethodCallFrequencyProfiler implements FlightRecorderListener, Auto
             List<Pattern> filterPatterns = new ArrayList<>(methodFilters);
             try (JfrMethodReader reader = new JfrMethodReader(recordingPath, filterPatterns)) {
                 methodCounts = reader.processMethodCalls();
-            }
-            
-            // Only store if we have data
-            if (!methodCounts.isEmpty()) {
-                // Check for excessive call frequencies
-                checkExcessiveCallFrequencies(methodCounts);
                 
-                // Update method trends
-                updateMethodTrends(currentTick, methodCounts);
-                
-                // Store method counts for this tick
-                tickMethodCounts.put(currentTick, Collections.unmodifiableMap(methodCounts));
-                
-                // Keep only the history window size worth of data
-                if (tickMethodCounts.size() > HISTORY_WINDOW_SIZE) {
-                    tickMethodCounts.keySet().stream()
-                        .sorted()
-                        .limit(tickMethodCounts.size() - HISTORY_WINDOW_SIZE)
-                        .forEach(tickMethodCounts::remove);
+                // Only store if we have data
+                if (!methodCounts.isEmpty()) {
+                    // Check for excessive call frequencies
+                    checkExcessiveCallFrequencies(methodCounts);
+                    
+                    // Update method trends
+                    updateMethodTrends(currentTick, methodCounts);
+                    
+                    // Store method counts for this tick
+                    tickMethodCounts.put(currentTick, Collections.unmodifiableMap(methodCounts));
+                    
+                    // Keep only the history window size worth of data
+                    if (tickMethodCounts.size() > HISTORY_WINDOW_SIZE) {
+                        tickMethodCounts.keySet().stream()
+                            .sorted()
+                            .limit(tickMethodCounts.size() - HISTORY_WINDOW_SIZE)
+                            .forEach(tickMethodCounts::remove);
+                    }
+                } else {
+                    platform.getPlugin().log(Level.FINE, "No method call data found in JFR recording");
                 }
+            } catch (IOException e) {
+                platform.getPlugin().log(Level.WARNING, 
+                    "Error processing JFR method call data: " + e.getMessage() + 
+                    ". File: " + recordingPath + ", Size: " + fileSize + " bytes", e);
             }
             
             // Update current tick
             currentTick = newTick;
         } catch (Exception e) {
-            platform.getPlugin().log(Level.WARNING, "Error processing JFR method call data", e);
+            platform.getPlugin().log(Level.WARNING, 
+                "Unexpected error in JFR method call frequency processing: " + e.getMessage(), e);
         }
     }
     
